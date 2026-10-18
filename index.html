@@ -579,6 +579,10 @@
   .form-note button{background:none; border:0; padding:0; color:var(--text-muted); text-decoration:underline; text-underline-offset:3px; cursor:pointer; font-size:inherit;}
   .form-status{grid-column:1/-1; font-size:.9rem; color:#9fd8a8; display:none;}
   .form-status.show{display:block;}
+  .form-status.error{color:#e9998c;}
+  .form-status a{color:inherit; text-decoration:underline; text-underline-offset:3px;}
+  .hp-field{position:absolute !important; left:-9999px; width:1px; height:1px; overflow:hidden;}
+  .btn[disabled]{opacity:.6; cursor:progress;}
   @media (max-width:980px){ .contact-grid{grid-template-columns:1fr;} }
   @media (max-width:560px){ .form{grid-template-columns:1fr;} }
 
@@ -1073,14 +1077,19 @@
         <textarea id="f-msg" name="message" placeholder="Erzählt uns ein wenig von eurem Tag …"></textarea>
       </div>
 
+      <div class="hp-field" aria-hidden="true">
+        <label for="f-hp">Bitte leer lassen</label>
+        <input id="f-hp" type="text" name="_honey" tabindex="-1" autocomplete="off">
+      </div>
+
       <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Per E-Mail senden
+        <button type="submit" class="btn btn-primary" id="sendMail">Anfrage senden
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
         </button>
         <button type="button" class="btn" id="sendWhatsApp">Per WhatsApp senden</button>
       </div>
       <p class="form-status" id="formStatus" role="status" aria-live="polite"></p>
-      <p class="form-note">Beim Absenden öffnet sich euer E-Mail-Programm bzw. WhatsApp mit der vorbereiteten Nachricht – über diese Website selbst werden keine Daten gespeichert. Mehr dazu in der <button type="button" data-open="datenschutz">Datenschutzerklärung</button>.</p>
+      <p class="form-note">Eure Anfrage wird über den Formular-Dienst FormSubmit per E-Mail an uns weitergeleitet. Alternativ öffnet „Per WhatsApp senden“ WhatsApp mit der vorbereiteten Nachricht. Mehr dazu in der <button type="button" data-open="datenschutz">Datenschutzerklärung</button>.</p>
     </form>
   </div>
 </section>
@@ -1186,7 +1195,7 @@
 
     <h3>4. Kontaktaufnahme</h3>
     <p>Wenn ihr uns per E-Mail, Telefon oder WhatsApp kontaktiert, verarbeiten wir eure Angaben (z.&nbsp;B. Namen, Kontaktdaten, Datum und Ort eurer Feier), um eure Anfrage zu beantworten und ein Angebot zu erstellen. Rechtsgrundlage ist Art.&nbsp;6 Abs.&nbsp;1 lit.&nbsp;b DSGVO. Die Daten werden gelöscht, sobald sie nicht mehr benötigt werden und keine gesetzlichen Aufbewahrungspflichten entgegenstehen.</p>
-    <p>Das Anfrageformular speichert oder überträgt selbst keine Daten. Es bereitet lediglich eine Nachricht vor, die ihr anschließend über euer eigenes E-Mail-Programm oder WhatsApp versendet.</p>
+    <p><strong>Anfrageformular:</strong> Für den Versand des Formulars nutzen wir den Dienst FormSubmit (formsubmit.co). Wenn ihr auf „Anfrage senden“ klickt, werden eure Eingaben an FormSubmit übermittelt und von dort per E-Mail an uns weitergeleitet. Auf dieser Website selbst werden keine Formulardaten gespeichert. Weitere Informationen: <a href="https://formsubmit.co/privacy.html" target="_blank" rel="noopener">formsubmit.co/privacy.html</a>.</p>
 
     <h3>5. WhatsApp</h3>
     <p>Wenn ihr uns über WhatsApp kontaktiert, erfolgt die Kommunikation über den Dienst der WhatsApp Ireland Ltd. bzw. Meta Platforms. Dabei können Daten auch in die USA übertragen werden. Bitte nutzt WhatsApp nur, wenn ihr damit einverstanden seid – alternativ erreicht ihr uns jederzeit per E-Mail oder Telefon.</p>
@@ -1410,12 +1419,54 @@
     var e = form.elements;
     return 'Anfrage ' + e.event.value + (e.date.value ? ' am ' + formatDate(e.date.value) : '') + ' – ' + e.name.value.trim();
   }
+  function showStatus(html, isError){
+    status.innerHTML = html;
+    status.classList.add('show');
+    status.classList.toggle('error', !!isError);
+  }
+  var sendBtn = document.getElementById('sendMail');
+  var sendLabel = sendBtn.firstChild.textContent;
+  // Versand direkt von der Website über FormSubmit (kein E-Mail-Programm nötig)
   form.addEventListener('submit', function(ev){
     ev.preventDefault();
     if(!validate()) return;
-    window.location.href = 'mailto:' + EMAIL + '?subject=' + encodeURIComponent(subject()) + '&body=' + encodeURIComponent(compose());
-    status.textContent = 'Euer E-Mail-Programm wurde mit der vorbereiteten Anfrage geöffnet. Falls nicht, schreibt uns direkt an ' + EMAIL + '.';
-    status.classList.add('show');
+    var e = form.elements;
+    var payload = {
+      _subject: subject(),
+      _template: 'table',
+      _captcha: 'false',
+      _honey: e._honey.value,
+      'Namen': e.name.value.trim(),
+      email: e.email.value.trim(),
+      'Telefon': e.phone.value.trim() || '–',
+      'Anlass': e.event.value,
+      'Datum': formatDate(e.date.value) || '–',
+      'Ort / Location': e.place.value.trim() || '–',
+      'Leistung': (form.querySelector('input[name="service"]:checked') || {value:'Noch offen'}).value,
+      'Nachricht': e.message.value.trim() || '–'
+    };
+    sendBtn.disabled = true;
+    sendBtn.firstChild.textContent = 'Wird gesendet … ';
+    status.classList.remove('show');
+    fetch('https://formsubmit.co/ajax/' + EMAIL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify(payload)
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if(String(res.success) !== 'true') throw new Error(res.message || 'Versand fehlgeschlagen');
+      form.reset();
+      showStatus('Vielen Dank! Eure Anfrage ist bei uns angekommen – wir melden uns innerhalb von 24 Stunden.');
+    })
+    .catch(function(err){
+      if(window.console) console.warn('Formularversand:', err);
+      showStatus('Leider konnte eure Anfrage gerade nicht gesendet werden. Schreibt uns bitte direkt an <a href="mailto:' + EMAIL + '">' + EMAIL + '</a> oder per <a href="https://wa.me/' + PHONE + '" target="_blank" rel="noopener">WhatsApp</a>.', true);
+    })
+    .then(function(){
+      sendBtn.disabled = false;
+      sendBtn.firstChild.textContent = sendLabel;
+    });
   });
   document.getElementById('sendWhatsApp').addEventListener('click', function(){
     if(!validate()) return;
